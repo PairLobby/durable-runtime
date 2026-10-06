@@ -1,0 +1,59 @@
+{
+  "name": "@pairlobby/durable-runtime",
+  "version": "0.1.0",
+  "description": "PairLobby rooms on Durable Objects: the room store and a standalone relay for Celld or Cloudflare",
+  "license": "Elastic-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "wrangler.jsonc",
+    "LICENSE",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PairLobby/durable-runtime.git"
+  },
+  "homepage": "https://pairlobby.com",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean",
+    "typecheck": "tsc --build --force",
+    "test": "tsc --build && vitest run",
+    "test:celld": "node scripts/test-celld-relay.mjs",
+    "dev": "wrangler dev",
+    "dev:celld": "CELLD_ESBUILD=node_modules/.bin/esbuild celld dev",
+    "check": "wrangler deploy --dry-run --outdir dist-bundle",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@pairlobby/protocol": "0.11.0",
+    "@pairlobby/room-core": "0.11.0",
+    "@pairlobby/server-core": "0.11.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260914.1",
+    "@pairlobby/client": "0.11.0",
+    "@pairlobby/fixtures": "0.11.0",
+    "@types/node": "^22.10.2",
+    "esbuild": "0.28.1",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.11",
+    "wrangler": "4.131.2"
+  }
+}
