@@ -1,13 +1,13 @@
 name: Release
 
-# Every merge to main runs the tests. Then it reads the version ssmver keeps in
+# Every merge to master runs the tests. Then it reads the version ssmver keeps in
 # ssmver.toml and bumps from commit prefixes (feature: minor, fix: patch, release:
 # major). When npm does not have @pairlobby/durable-runtime at that version, this
 # publishes it and tags the merged commit v<version>. A merge that does not bump the
 # version (chore:) publishes nothing. Needs the NPM_TOKEN secret.
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
   workflow_dispatch:
 
