@@ -1,0 +1,13 @@
+node_modules/
+dist/
+dist-bundle/
+*.tsbuildinfo
+*.tgz
+.wrangler/
+.celld/
+.dev.vars
+coverage/
+.ssmver/
+.DS_Store
+.vscode/
+.idea/
