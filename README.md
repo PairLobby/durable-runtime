@@ -53,7 +53,7 @@ Multi-node Celld fleets are not tested.
 
 ## Versioning
 
-[ssmver](https://github.com/hjoncour/ssmver); run `ssmver init` once per clone.
+[ssmver](https://github.com/hjoncour/ssmver); run `ssmver init` once per clone. Merges to `master` run the release workflow, which publishes through npm's GitHub Actions trust without a long-lived npm token.
 
 ## License
 
