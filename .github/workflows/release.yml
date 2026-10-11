@@ -4,7 +4,8 @@ name: Release
 # ssmver.toml and bumps from commit prefixes (feature: minor, fix: patch, release:
 # major). When npm does not have @pairlobby/durable-runtime at that version, this
 # publishes it and tags the merged commit v<version>. A merge that does not bump the
-# version (chore:) publishes nothing. Needs the NPM_TOKEN secret.
+# version (chore:) publishes nothing. npm trusts this exact GitHub workflow and
+# exchanges its OIDC identity for a short-lived publish credential.
 on:
   push:
     branches: [master]
@@ -30,6 +31,8 @@ jobs:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
+      - name: Use an npm CLI with trusted publishing support
+        run: npm install --global npm@11.21.0
       - run: npm ci
       - run: npm test
       - name: Check the relay bundles
@@ -62,14 +65,8 @@ jobs:
       - name: Publish to npm
         if: steps.version.outputs.publish == 'true'
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: 'true'
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::error::The NPM_TOKEN secret is not set, so $VERSION was not published. Add it and re-run this workflow."
-            exit 1
-          fi
           # A prerelease (0.2.0-beta.1) must not become what a plain `npm install` gets.
           tag=latest
           case "$VERSION" in *-*) tag=next ;; esac
