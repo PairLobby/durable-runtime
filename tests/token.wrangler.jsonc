@@ -1,0 +1,16 @@
+// The standalone relay with a create token, for tests/create-token.test.ts.
+{
+  "name": "pairlobby-relay-token",
+  "main": "../src/standalone.ts",
+  "compatibility_date": "2026-09-14",
+  "durable_objects": {
+    "bindings": [
+      {"name": "ROOMS", "class_name": "PairLobbyRoom"},
+      {"name": "INVITES", "class_name": "PairLobbyInviteDirectory"}
+    ]
+  },
+  "migrations": [
+    {"tag": "v1", "new_sqlite_classes": ["PairLobbyRoom", "PairLobbyInviteDirectory"]}
+  ],
+  "vars": {"PAIRLOBBY_DEPLOYMENT_MODE": "self-hosted", "PAIRLOBBY_CREATE_TOKEN": "test-create-token"}
+}

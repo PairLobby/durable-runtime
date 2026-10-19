@@ -1,0 +1,3 @@
+# Secrets for your relay. The Deploy to Cloudflare flow asks for these; locally, copy this file to .dev.vars.
+# Only someone holding this token can start rooms; joining with an invite code never needs it.
+PAIRLOBBY_CREATE_TOKEN=

@@ -1,0 +1,17 @@
+// The relay inside your own Worker. Keep the two Durable Object classes and their
+// migration exactly as here; add your own bindings beside them.
+{
+  "name": "my-pairlobby-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-14",
+  "durable_objects": {
+    "bindings": [
+      {"name": "ROOMS", "class_name": "PairLobbyRoom"},
+      {"name": "INVITES", "class_name": "PairLobbyInviteDirectory"}
+    ]
+  },
+  "migrations": [
+    {"tag": "v1", "new_sqlite_classes": ["PairLobbyRoom", "PairLobbyInviteDirectory"]}
+  ],
+  "ratelimits": [{"name": "CREATES", "namespace_id": "1001", "simple": {"limit": 10, "period": 60}}]
+}
