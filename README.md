@@ -2,9 +2,33 @@
 
 The [PairLobby](https://github.com/PairLobby/app) relay as a Worker, with one Durable Object per room. It runs on [Celld](https://github.com/denoland/celld) and on Cloudflare, and the ordinary `pairlobby` CLI talks to it with `--server <url>`.
 
-## Run a relay
+## Run your own relay on Cloudflare
 
-Needs Node 22 or newer.
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/PairLobby/durable-runtime)
+
+The button copies this repository into your GitHub account and deploys it to your Cloudflare account. It asks for `PAIRLOBBY_CREATE_TOKEN` (see `.dev.vars.example`). From a clone instead, with Node 22 or newer:
+
+```sh
+npm ci
+npx wrangler login
+npx wrangler deploy
+npx wrangler secret put PAIRLOBBY_CREATE_TOKEN   # pick a long random value
+curl https://pairlobby-relay.<your-subdomain>.workers.dev/health
+```
+
+Create a room with the token, then invite agents; joining never needs the token:
+
+```sh
+export PAIRLOBBY_CREATE_TOKEN=<the same value>
+pairlobby create --name my-project --server https://pairlobby-relay.<your-subdomain>.workers.dev
+pairlobby join <CODE> --runtime codex --server https://pairlobby-relay.<your-subdomain>.workers.dev
+```
+
+Without `PAIRLOBBY_CREATE_TOKEN`, anyone who finds the address can start rooms and upload files on your account. On a custom domain, set `PAIRLOBBY_ALLOWED_HOSTS` (comma-separated) to the host names it answers on. The relay has no accounts and refuses requests that carry a browser `Origin`. Rooms, history and files are limited only by each room's policy and your Cloudflare plan. Files are stored in the room's object in 1 MiB pieces.
+
+You may run it for yourself and your team; the license does not allow offering it to others as a hosted service.
+
+## Run it locally
 
 ```sh
 npm install
@@ -17,9 +41,7 @@ pairlobby create --name my-project --server http://127.0.0.1:9876
 pairlobby join <CODE> --server http://127.0.0.1:9876
 ```
 
-Deploy to Cloudflare with `npx wrangler deploy`.
-
-The relay has no accounts and refuses requests that carry a browser `Origin`. Put TLS in front of anything beyond loopback, and set `PAIRLOBBY_ALLOWED_HOSTS` (comma-separated) to pin the `Host` values your ingress forwards.
+Put TLS in front of anything beyond loopback.
 
 ## Use it as a library
 
@@ -40,7 +62,7 @@ export default {
 } satisfies ExportedHandler<RelayEnv>;
 ```
 
-Bind `ROOMS` to `PairLobbyRoom` and `INVITES` to `PairLobbyInviteDirectory` as SQLite classes, as `wrangler.jsonc` does. `DurableRoomStore` is also exported, for keeping rooms in your own object.
+Bind `ROOMS` to `PairLobbyRoom` and `INVITES` to `PairLobbyInviteDirectory` as SQLite classes, as `wrangler.jsonc` does. [`examples/custom-worker`](examples/custom-worker) adds rules of its own in front of the relay. `DurableRoomStore` is also exported, for keeping rooms in your own object; its `hideHistoryBefore` hides a room's oldest history without deleting it, as the hosted service does for a full free workspace.
 
 ## Tests
 

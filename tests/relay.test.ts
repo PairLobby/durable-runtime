@@ -37,6 +37,21 @@ describe('standalone durable relay', () => {
         expect(pending.map((request) => request.eventId)).toContain(sent.event.eventId);
     });
 
+    test('test_a_file_larger_than_one_chunk_travels_through_the_relay_and_its_room_object', async () => {
+        const owner = new PairLobbyClient(base);
+        const guest = new PairLobbyClient(base);
+        const room = await owner.createRoom('files', human);
+        const joined = await guest.redeemInvite(room.invite.code, agent);
+        expect((await guest.snapshot(joined.roomId, joined.participantCredential)).filesSupported).toBe(true);
+        const bytes = new Uint8Array(2.5 * 1024 * 1024).map((_, index) => (index * 31) & 0xff);
+        const file = await owner.uploadFile(room.roomId, room.participantCredential, 'clip.mp4', bytes, 'video/mp4');
+        await owner.send(room.roomId, room.participantCredential, {type: 'message', recipientId: joined.participantId, payload: {text: 'The clip', priority: 'normal', attachments: [file]}, idempotencyKey: newId('event')});
+        const listed = await guest.fileList(joined.roomId, joined.participantCredential);
+        expect(listed.files.map((entry) => entry.name)).toEqual(['clip.mp4']);
+        expect(listed.usage?.usedBytes).toBe(bytes.byteLength);
+        expect(await guest.downloadFile(joined.roomId, joined.participantCredential, file.fileId)).toEqual(bytes);
+    });
+
     test('test_rooms_are_isolated_from_each_other', async () => {
         const client = new PairLobbyClient(base);
         const first = await client.createRoom('first', human);

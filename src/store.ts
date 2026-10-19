@@ -5,16 +5,25 @@
 import {ProtocolError, mergeMessageRequest} from '@pairlobby/protocol';
 import {SCHEMA} from './schema.js';
 
-import type {HandoverRecord, MessageRequest, RequestPage, InviteRecord, ParticipantRecord, RoomEvent, RoomRecord} from '@pairlobby/protocol';
+import type {FileRecord, HandoverRecord, MessageRequest, RequestPage, InviteRecord, ParticipantRecord, RoomEvent, RoomRecord} from '@pairlobby/protocol';
 import type {Mutation, RoomView} from '@pairlobby/room-core';
 import {REQUEST_BACKFILL_SQL} from '@pairlobby/server-core';
-import type {EventPage, IdempotencyRecord, RoomStore} from '@pairlobby/server-core';
+import type {EventPage, FileStore, IdempotencyRecord, RoomStore} from '@pairlobby/server-core';
 
 type IdempotencyKey = {key: string; requestDigest: string} | null;
 
 interface BodyRow {
     body: string;
 }
+
+/** Durable Object SQLite keeps a row under 2 MB, so a file is stored in 1 MiB pieces. */
+const FILE_CHUNK_BYTES = 1024 * 1024;
+
+/** Events from the room's `earliest_seq` on; anything before it is hidden even while its rows remain. */
+export const VISIBLE_EVENT_SQL = 'seq >= (SELECT earliest_seq FROM rooms WHERE rooms.room_id = events.room_id)';
+
+/** A file goes with its message: one attached to a hidden event is hidden too. A pending upload has no event yet. */
+export const VISIBLE_FILE_SQL = "(event_id IS NULL OR NOT EXISTS (SELECT 1 FROM events JOIN rooms ON rooms.room_id = events.room_id WHERE events.room_id = files.room_id AND json_extract(events.body, '$.eventId') = files.event_id AND events.seq < rooms.earliest_seq))";
 
 export class DurableRoomStore implements RoomStore {
     private readonly db: SqlDriver;
@@ -31,6 +40,44 @@ export class DurableRoomStore implements RoomStore {
     private transaction<T>(run: () => T): T {
         return this.storage.transactionSync(run);
     }
+
+    readonly files: FileStore = {
+        putFile: async (file, bytes, limitBytes) => this.transaction(() => {
+            const held = this.db.prepare('SELECT coalesce(sum(size), 0) AS total FROM files WHERE room_id = ?').get(file.roomId) as {total: number};
+            if (Number(held.total) + file.size > limitBytes) {
+                return false;
+            }
+            this.db.prepare('INSERT INTO files (file_id, room_id, size, created_at, event_id, body) VALUES (?, ?, ?, ?, ?, ?)').run(file.fileId, file.roomId, file.size, file.createdAt, file.eventId, JSON.stringify(file));
+            const insert = this.db.prepare('INSERT INTO file_chunks (file_id, idx, bytes) VALUES (?, ?, ?)');
+            for (let offset = 0, index = 0; offset < bytes.byteLength; offset += FILE_CHUNK_BYTES, index++) {
+                insert.run(file.fileId, index, bytes.slice(offset, offset + FILE_CHUNK_BYTES).buffer);
+            }
+            return true;
+        }),
+        file: async (roomId, fileId) => {
+            const row = this.db.prepare(`SELECT body FROM files WHERE room_id = ? AND file_id = ? AND ${VISIBLE_FILE_SQL}`).get(roomId, fileId) as BodyRow | undefined;
+            return row ? (JSON.parse(row.body) as FileRecord) : null;
+        },
+        fileBytes: async (roomId, fileId) => {
+            const file = this.db.prepare(`SELECT size FROM files WHERE room_id = ? AND file_id = ? AND ${VISIBLE_FILE_SQL}`).get(roomId, fileId) as {size: number} | undefined;
+            if (!file) {
+                return null;
+            }
+            const bytes = new Uint8Array(Number(file.size));
+            let offset = 0;
+            for (const chunk of this.db.prepare('SELECT bytes FROM file_chunks WHERE file_id = ? ORDER BY idx').all(fileId) as unknown as {bytes: ArrayBuffer}[]) {
+                bytes.set(new Uint8Array(chunk.bytes), offset);
+                offset += chunk.bytes.byteLength;
+            }
+            return offset === bytes.byteLength ? bytes : null;
+        },
+        attachedFiles: async (roomId) => this.rows<FileRecord>(`SELECT body FROM files WHERE room_id = ? AND event_id IS NOT NULL AND ${VISIBLE_FILE_SQL} ORDER BY created_at, file_id`, roomId),
+        usedBytes: async (roomId) => Number((this.db.prepare(`SELECT coalesce(sum(size), 0) AS total FROM files WHERE room_id = ? AND ${VISIBLE_FILE_SQL}`).get(roomId) as {total: number}).total),
+        deleteUnattachedFiles: async (roomId, before) => this.transaction(() => {
+            this.db.prepare('DELETE FROM file_chunks WHERE file_id IN (SELECT file_id FROM files WHERE room_id = ? AND event_id IS NULL AND created_at < ?)').run(roomId, before);
+            this.db.prepare('DELETE FROM files WHERE room_id = ? AND event_id IS NULL AND created_at < ?').run(roomId, before);
+        })
+    };
 
     async createRoom(room: RoomRecord, participant: ParticipantRecord, event: RoomEvent): Promise<void> {
         this.transaction(() => {
@@ -80,6 +127,14 @@ export class DurableRoomStore implements RoomStore {
                     .run(control.roomId, control.targetParticipantId, JSON.stringify(control));
             }
             for (const request of mutation.upsertRequests ?? []) this.writeRequest(request);
+            for (const fileId of mutation.attachFiles ?? []) {
+                const row = this.db.prepare('SELECT body FROM files WHERE room_id = ? AND file_id = ? AND event_id IS NULL').get(mutation.room.roomId, fileId) as BodyRow | undefined;
+                if (!row) {
+                    throw new ProtocolError('invalid_request', 'an attached file is no longer available; upload it again');
+                }
+                const file: FileRecord = {...(JSON.parse(row.body) as FileRecord), eventId: mutation.appendEvent.eventId};
+                this.db.prepare('UPDATE files SET event_id = ?, body = ? WHERE file_id = ?').run(file.eventId, JSON.stringify(file), fileId);
+            }
             this.writeEvent(mutation.appendEvent);
             if (idempotency) {
                 this.db
@@ -91,7 +146,7 @@ export class DurableRoomStore implements RoomStore {
 
     async readEvents(roomId: string, after: number, limit: number): Promise<EventPage> {
         const pageLimit = Math.min(limit, 100);
-        const rows = this.db.prepare('SELECT body FROM events WHERE room_id = ? AND seq > ? ORDER BY seq LIMIT ?').all(roomId, after, pageLimit + 1) as unknown as BodyRow[];
+        const rows = this.db.prepare(`SELECT body FROM events WHERE room_id = ? AND seq > ? AND ${VISIBLE_EVENT_SQL} ORDER BY seq LIMIT ?`).all(roomId, after, pageLimit + 1) as unknown as BodyRow[];
         const events: RoomEvent[] = [];
         let bytes = 0;
         for (const row of rows.slice(0, pageLimit)) {
@@ -106,12 +161,12 @@ export class DurableRoomStore implements RoomStore {
     }
 
     async eventBySeq(roomId: string, seq: number): Promise<RoomEvent | null> {
-        const row = this.db.prepare('SELECT body FROM events WHERE room_id = ? AND seq = ?').get(roomId, seq) as BodyRow | undefined;
+        const row = this.db.prepare(`SELECT body FROM events WHERE room_id = ? AND seq = ? AND ${VISIBLE_EVENT_SQL}`).get(roomId, seq) as BodyRow | undefined;
         return row ? (JSON.parse(row.body) as RoomEvent) : null;
     }
 
     async eventById(roomId: string, eventId: string): Promise<RoomEvent | null> {
-        const row = this.db.prepare("SELECT body FROM events WHERE room_id = ? AND json_extract(body, '$.eventId') = ?").get(roomId, eventId) as BodyRow | undefined;
+        const row = this.db.prepare(`SELECT body FROM events WHERE room_id = ? AND json_extract(body, '$.eventId') = ? AND ${VISIBLE_EVENT_SQL}`).get(roomId, eventId) as BodyRow | undefined;
         return row ? (JSON.parse(row.body) as RoomEvent) : null;
     }
 
@@ -254,7 +309,8 @@ export class DurableRoomStore implements RoomStore {
     /** Physical cleanup. Access was already denied by the lifecycle change. */
     async deleteRoom(roomId: string): Promise<void> {
         this.transaction(() => {
-            for (const table of ['message_requests', 'events', 'idempotency', 'handovers', 'controls', 'invites', 'participants']) {
+            this.db.prepare('DELETE FROM file_chunks WHERE file_id IN (SELECT file_id FROM files WHERE room_id = ?)').run(roomId);
+            for (const table of ['files', 'message_requests', 'events', 'idempotency', 'handovers', 'controls', 'invites', 'participants']) {
                 this.db.prepare(`DELETE FROM ${table} WHERE room_id = ?`).run(roomId);
             }
         });
@@ -270,6 +326,15 @@ export class DurableRoomStore implements RoomStore {
     async nextAutoCloseAt(): Promise<number | null> {
         const row = this.db.prepare("SELECT min(json_extract(body, '$.autoCloseAt')) AS at FROM rooms WHERE json_extract(body, '$.lifecycle') = 'open' AND json_extract(body, '$.autoCloseAt') IS NOT NULL").get() as {at: number | null} | undefined;
         return row?.at ?? null;
+    }
+
+    /**
+     * Hides the room's history before `seq` without deleting it: reads, exports and the
+     * files those messages carried stop at the new start, and the rows stay for an
+     * archive to collect. The start only moves forward.
+     */
+    hideHistoryBefore(roomId: string, seq: number): void {
+        this.db.prepare('UPDATE rooms SET earliest_seq = max(earliest_seq, ?) WHERE room_id = ?').run(seq, roomId);
     }
 
     /** Simulates retention dropping the front of the log without touching room state. */
@@ -307,14 +372,14 @@ class SqlDriver {
     prepare(query: string) {
         const sql = this.sql;
         return {
-            run(...values: (string | number | null)[]) {
+            run(...values: SqlStorageValue[]) {
                 const result = sql.exec(query, ...values);
                 return {changes: Number(sql.exec('SELECT changes() AS n').one().n)};
             },
-            get(...values: (string | number | null)[]) {
+            get(...values: SqlStorageValue[]) {
                 return sql.exec(query, ...values).toArray()[0];
             },
-            all(...values: (string | number | null)[]) {
+            all(...values: SqlStorageValue[]) {
                 return sql.exec(query, ...values).toArray();
             }
         };

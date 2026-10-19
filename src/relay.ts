@@ -12,7 +12,12 @@ export type RelayEnv = {
     INVITES: DurableObjectNamespace<PairLobbyInviteDirectory>;
     /** Comma-separated Host values to accept; unset accepts any host behind the operator's ingress. */
     PAIRLOBBY_ALLOWED_HOSTS?: string;
+    /** When set, creating a room needs this token; joining with an invite code never does. */
+    PAIRLOBBY_CREATE_TOKEN?: string;
 };
+
+/** The header the CLI sends with a room creation, from `PAIRLOBBY_CREATE_TOKEN` on its side. */
+export const CREATE_TOKEN_HEADER = 'x-pairlobby-account-token';
 
 /** Internal claim from the relay to a room object; any caller-supplied copy is overwritten. */
 export const ROOM_ID_HEADER = 'x-pairlobby-room-id';
@@ -44,9 +49,23 @@ function admitted(request: Request, env: RelayEnv): Response | null {
     return null;
 }
 
+async function sha256(value: string): Promise<Uint8Array> {
+    return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
+}
+
+/** Compares digests, so the time taken says nothing about how much of the token matched. */
+async function mayCreate(request: Request, env: RelayEnv): Promise<boolean> {
+    if (!env.PAIRLOBBY_CREATE_TOKEN) {
+        return true;
+    }
+    const [expected, given] = await Promise.all([sha256(env.PAIRLOBBY_CREATE_TOKEN), sha256(request.headers.get(CREATE_TOKEN_HEADER) ?? '')]);
+    return expected.every((byte, index) => byte === given[index]);
+}
+
 function forward(request: Request, env: RelayEnv, roomId: string, body?: string): Promise<Response> {
     const headers = new Headers(request.headers);
     headers.delete(ROOM_ID_HEADER);
+    headers.delete(CREATE_TOKEN_HEADER);
     if (body !== undefined && request.method === 'POST' && new URL(request.url).pathname === '/v1/rooms') {
         headers.set(ROOM_ID_HEADER, roomId);
     }
@@ -69,6 +88,9 @@ export async function handleRelay(request: Request, env: RelayEnv): Promise<Resp
     }
     // A new room gets its id here, because the id names the object that will hold it.
     if (url.pathname === '/v1/rooms' && request.method === 'POST') {
+        if (!(await mayCreate(request, env))) {
+            return error('unauthorized', 'this relay needs its create token to start a room; set PAIRLOBBY_CREATE_TOKEN', 401);
+        }
         return forward(request, env, newId('room'), await request.text());
     }
     // A code names its room only through the directory; the room then validates it.
