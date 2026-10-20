@@ -49,7 +49,10 @@ describe('standalone durable relay', () => {
         const listed = await guest.fileList(joined.roomId, joined.participantCredential);
         expect(listed.files.map((entry) => entry.name)).toEqual(['clip.mp4']);
         expect(listed.usage?.usedBytes).toBe(bytes.byteLength);
-        expect(await guest.downloadFile(joined.roomId, joined.participantCredential, file.fileId)).toEqual(bytes);
+        const downloaded = await guest.downloadFile(joined.roomId, joined.participantCredential, file.fileId);
+        expect(downloaded.byteLength).toBe(bytes.byteLength);
+        // A deep toEqual over 2.5 MB takes seconds on a slow runner; the first differing byte says the same.
+        expect(downloaded.findIndex((byte, index) => byte !== bytes[index])).toBe(-1);
     });
 
     test('test_rooms_are_isolated_from_each_other', async () => {
