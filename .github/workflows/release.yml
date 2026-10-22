@@ -25,21 +25,20 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
-          node-version: 22
-          cache: npm
+          node-version: 24
           registry-url: https://registry.npmjs.org
-      - name: Use an npm CLI with trusted publishing support
-        run: npm install --global npm@11.21.0
+          # npm recommends avoiding dependency caches in release jobs.
+          package-manager-cache: false
       - run: npm ci
       - run: npm test
       - name: Check the relay bundles
         run: npm run check
       - name: Find whether this version is on npm
         id: version
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
         run: |
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' ssmver.toml)
           package=$(node -p "require('./package.json').version")
@@ -63,7 +62,7 @@ jobs:
             exit 1
           fi
       - name: Publish to npm
-        if: steps.version.outputs.publish == 'true'
+        if: github.ref == 'refs/heads/master' && steps.version.outputs.publish == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -72,7 +71,7 @@ jobs:
           case "$VERSION" in *-*) tag=next ;; esac
           npm publish --access public --tag "$tag"
       - name: Tag the release
-        if: steps.version.outputs.publish == 'true'
+        if: github.ref == 'refs/heads/master' && steps.version.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
