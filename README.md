@@ -77,6 +77,17 @@ Multi-node Celld fleets are not tested.
 
 [ssmver](https://github.com/hjoncour/ssmver); run `ssmver init` once per clone. Merges to `master` run the release workflow, which publishes through npm's GitHub Actions trust without a long-lived npm token.
 
+The npm package must trust this exact repository, workflow filename, and direct-publish action. Configure it once as an npm package owner with account-level 2FA enabled:
+
+```sh
+npx --yes npm@11.21.0 trust github @pairlobby/durable-runtime \
+  --repo PairLobby/durable-runtime \
+  --file release.yml \
+  --allow-publish
+```
+
+The pinned npm CLI is intentional: older npm 11 releases do not recognize `--allow-publish`, while the registry now requires an explicit publishing permission. Without it, npm rejects creation of the trust relationship; a later Actions publish then falls back to unauthenticated publishing and reports a misleading package-not-found error. A new trusted-publisher relationship expires unless its first successful publish happens within two days. After configuring it, rerun the failed `Release` workflow.
+
 ## License
 
 [Elastic License 2.0](LICENSE).
