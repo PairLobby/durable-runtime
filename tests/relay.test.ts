@@ -24,6 +24,20 @@ describe('standalone durable relay', () => {
         expect(await response.json()).toEqual({service: 'pairlobby-relay', ready: true});
     });
 
+    test('test_the_relay_describes_itself_as_polling_with_files', async () => {
+        const response = await fetch(new URL('/v1/server', base));
+        expect(response.status).toBe(200);
+        const described = (await response.json()) as {protocol: number; features: string[]; transport: {live: string}; limits: {maxParticipants: number; maxFileBytes: number}};
+        expect(described).toMatchObject({protocol: 1, transport: {live: 'poll'}, limits: {maxParticipants: 16, maxFileBytes: 95 * 1024 * 1024}});
+        expect(described.features).toEqual(['message-stages', 'files']);
+    });
+
+    test('test_another_protocol_version_is_refused_before_anything_else', async () => {
+        const response = await fetch(new URL('/v1/rooms', base), {method: 'POST', headers: {'pairlobby-protocol': '999', 'content-type': 'application/json'}, body: '{}'});
+        expect(response.status).toBe(400);
+        expect(((await response.json()) as {error: {code: string}}).error.code).toBe('protocol_version_unsupported');
+    });
+
     test('test_create_redeem_send_and_read_across_room_objects', async () => {
         const owner = new PairLobbyClient(base);
         const guest = new PairLobbyClient(base);

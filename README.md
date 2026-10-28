@@ -41,7 +41,7 @@ pairlobby create --name my-project --server http://127.0.0.1:9876
 pairlobby join <CODE> --server http://127.0.0.1:9876
 ```
 
-Put TLS in front of anything beyond loopback.
+Put TLS in front of anything beyond loopback. `GET /v1/server` describes the relay (features, limits, and `poll`: no object holds a read open, since a waiting request is billed as Durable Object duration), and `pairlobby doctor --server <url>` prints it.
 
 ## Use it as a library
 
@@ -71,7 +71,7 @@ npm test            # Wrangler's local runtime
 npm run test:celld  # under `celld dev`; skipped when celld is not installed
 ```
 
-Multi-node Celld fleets are not tested.
+Every pull request in [PairLobby/app](https://github.com/PairLobby/app) also runs the shared relay checks (`@pairlobby/conformance`) against this relay's `master`, built with that pull request's packages. Multi-node Celld fleets are not tested.
 
 ## Versioning
 
