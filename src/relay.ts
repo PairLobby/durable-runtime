@@ -2,7 +2,7 @@
 //! `pairlobby serve`, with each room in its own Durable Object. It runs unchanged
 //! on Celld and on Cloudflare; the ordinary CLI talks to it with `--server <url>`.
 
-import {RedeemInviteRequest, RoomId, hashCredential, newId, normalizeInviteCode} from '@pairlobby/protocol';
+import {ABSOLUTE_MAX_FILE_BYTES, DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_RETAINED_FILE_BYTES, DEFAULT_ROOM_POLICY, PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER, RedeemInviteRequest, RoomId, hashCredential, newId, normalizeInviteCode} from '@pairlobby/protocol';
 
 import type {PairLobbyInviteDirectory} from './invite-directory.js';
 import type {PairLobbyRoom} from './room-object.js';
@@ -33,11 +33,16 @@ function error(code: string, message: string, status: number): Response {
 }
 
 /**
- * A browser page must not drive a relay with a person's credentials, so any
+ * A request for another protocol version is refused first, as on every relay. A
+ * browser page must not drive a relay with a person's credentials, so any
  * request carrying an Origin is refused, as on the local relay. An operator can
  * also pin the Host values its ingress forwards.
  */
 function admitted(request: Request, env: RelayEnv): Response | null {
+    const declared = request.headers.get(PROTOCOL_VERSION_HEADER);
+    if (declared !== null && declared !== String(PROTOCOL_VERSION)) {
+        return error('protocol_version_unsupported', `this server speaks protocol version ${PROTOCOL_VERSION}`, 400);
+    }
     if (request.headers.get('origin') !== null) {
         return error('unauthorized', 'this origin may not call this server', 401);
     }
@@ -47,6 +52,27 @@ function admitted(request: Request, env: RelayEnv): Response | null {
         return error('unauthorized', 'unexpected host header', 401);
     }
     return null;
+}
+
+/**
+ * `GET /v1/server`, in the shape app's `describeRelay` gives every relay. Rooms here keep files under the
+ * default policy, and every read is a poll: no object holds a request open, which would bill it while it waits.
+ */
+function describeRelay(env: RelayEnv): Record<string, unknown> {
+    const policy = DEFAULT_ROOM_POLICY;
+    return {
+        protocol: PROTOCOL_VERSION,
+        features: ['message-stages', 'files', ...(env.PAIRLOBBY_CREATE_TOKEN ? ['create-token'] : [])],
+        transport: {live: 'poll'},
+        limits: {
+            maxParticipants: policy.maxParticipants,
+            maxEventPayloadBytes: policy.maxEventPayloadBytes,
+            maxRetainedEvents: policy.maxRetainedEvents,
+            maxRetainedEventBytes: policy.maxRetainedEventBytes,
+            maxFileBytes: Math.min(policy.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES, ABSOLUTE_MAX_FILE_BYTES),
+            maxRetainedFileBytes: policy.maxRetainedFileBytes ?? DEFAULT_MAX_RETAINED_FILE_BYTES
+        }
+    };
 }
 
 async function sha256(value: string): Promise<Uint8Array> {
@@ -82,6 +108,9 @@ export async function handleRelay(request: Request, env: RelayEnv): Promise<Resp
     const segments = url.pathname.split('/').filter(Boolean);
     if (url.pathname === '/health' && request.method === 'GET') {
         return json({service: 'pairlobby-relay', ready: true});
+    }
+    if (url.pathname === '/v1/server' && request.method === 'GET') {
+        return json(describeRelay(env));
     }
     if (segments[0] !== 'v1') {
         return error('invalid_request', 'unknown path', 404);
