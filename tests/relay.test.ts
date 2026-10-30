@@ -108,6 +108,15 @@ describe('standalone durable relay', () => {
         expect((await client.snapshot(room.roomId, room.participantCredential)).name).toBe('owned');
     });
 
+    test('test_a_forged_room_header_cannot_send_a_request_to_another_room', async () => {
+        const client = new PairLobbyClient(base);
+        const mine = await client.createRoom('mine', human);
+        const theirs = await client.createRoom('theirs', human);
+        const response = await fetch(new URL(`/v1/rooms/${mine.roomId}`, base), {headers: {authorization: `Bearer ${mine.participantCredential}`, 'x-pairlobby-room-id': theirs.roomId}});
+        expect(response.status).toBe(200);
+        expect(((await response.json()) as {roomId: string; name: string})).toMatchObject({roomId: mine.roomId, name: 'mine'});
+    });
+
     test('test_malformed_room_ids_and_unknown_paths_are_refused', async () => {
         expect((await fetch(new URL('/v1/rooms/not-a-room/snapshot', base))).status).toBe(404);
         expect((await fetch(new URL('/elsewhere', base))).status).toBe(404);

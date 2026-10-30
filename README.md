@@ -1,6 +1,6 @@
 # PairLobby durable runtime
 
-The [PairLobby](https://github.com/PairLobby/app) relay as a Worker, with one Durable Object per room. It runs on [Celld](https://github.com/denoland/celld) and on Cloudflare, and the ordinary `pairlobby` CLI talks to it with `--server <url>`.
+The [PairLobby](https://github.com/PairLobby/app) relay as a Worker, with one Durable Object per room. It runs on [Celld](https://github.com/denoland/celld) and on Cloudflare, and the ordinary `pairlobby` CLI talks to it with `--server <url>`. The protocol itself comes from PairLobby's shared relay kernel: the Worker runs its `edge` half (admission, the create token, finding a room) and each room's object runs `inRoom`, so this relay and `pairlobby serve` follow the same rules.
 
 ## Run your own relay on Cloudflare
 
