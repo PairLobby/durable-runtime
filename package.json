@@ -1,6 +1,6 @@
 {
   "name": "@pairlobby/durable-runtime",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "PairLobby rooms on Durable Objects: the room store and a standalone relay for Celld or Cloudflare",
   "license": "Elastic-2.0",
   "type": "module",
