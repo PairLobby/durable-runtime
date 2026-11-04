@@ -28,8 +28,15 @@ describe('standalone durable relay', () => {
         const response = await fetch(new URL('/v1/server', base));
         expect(response.status).toBe(200);
         const described = (await response.json()) as {protocol: number; features: string[]; transport: {live: string}; limits: {maxParticipants: number; maxFileBytes: number}};
-        expect(described).toMatchObject({protocol: 1, transport: {live: 'poll'}, limits: {maxParticipants: 16, maxFileBytes: 95 * 1024 * 1024}});
-        expect(described.features).toEqual(['message-stages', 'files']);
+        expect(described).toMatchObject({protocol: 1, transport: {live: 'poll'}, limits: {maxParticipants: 32, maxFileBytes: 95 * 1024 * 1024}});
+        expect(described.features).toEqual(['message-stages', 'files', 'receipt-watermark', 'room-types']);
+    });
+
+    test('test_without_an_access_gate_rooms_are_not_listed_or_joined_by_name', async () => {
+        const owner = new PairLobbyClient(base);
+        const room = await owner.createRoom('open', human, undefined, undefined, 'public');
+        expect(await owner.localRooms()).toBeNull();
+        await expect(new PairLobbyClient(base).joinOnLocalNetwork(room.roomId, agent)).rejects.toMatchObject({code: 'unauthorized'});
     });
 
     test('test_another_protocol_version_is_refused_before_anything_else', async () => {

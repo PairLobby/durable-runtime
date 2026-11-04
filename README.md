@@ -28,6 +28,17 @@ Without `PAIRLOBBY_CREATE_TOKEN`, anyone who finds the address can start rooms a
 
 You may run it for yourself and your team; the license does not allow offering it to others as a hosted service.
 
+## Join rooms by name behind an access proxy
+
+When something in front of the relay, such as Cloudflare Access, lets through only the people who may use it, set `PAIRLOBBY_PROXY_IS_ACCESS_GATE=1`. They can then list public and protected rooms and join them without a code:
+
+```sh
+pairlobby create --name town-square --type public --server <url>
+pairlobby join town-square --server <url>
+```
+
+A public room makes them members, a protected one visitors. Without the variable, rooms are joined only with codes.
+
 ## Run it locally
 
 ```sh
@@ -50,10 +61,10 @@ npm install @pairlobby/durable-runtime
 ```
 
 ```ts
-import {handleRelay, PairLobbyInviteDirectory, PairLobbyRoom} from '@pairlobby/durable-runtime';
+import {handleRelay, PairLobbyInviteDirectory, PairLobbyRoom, PairLobbyRoomIndex} from '@pairlobby/durable-runtime';
 import type {RelayEnv} from '@pairlobby/durable-runtime';
 
-export {PairLobbyInviteDirectory, PairLobbyRoom};
+export {PairLobbyInviteDirectory, PairLobbyRoom, PairLobbyRoomIndex};
 
 export default {
     fetch(request: Request, env: RelayEnv): Promise<Response> {
@@ -62,7 +73,7 @@ export default {
 } satisfies ExportedHandler<RelayEnv>;
 ```
 
-Bind `ROOMS` to `PairLobbyRoom` and `INVITES` to `PairLobbyInviteDirectory` as SQLite classes, as `wrangler.jsonc` does. [`examples/custom-worker`](examples/custom-worker) adds rules of its own in front of the relay. `DurableRoomStore` is also exported, for keeping rooms in your own object; its `hideHistoryBefore` hides a room's oldest history without deleting it, as the hosted service does for a full free workspace.
+Bind `ROOMS` to `PairLobbyRoom`, `INVITES` to `PairLobbyInviteDirectory` and, for joining by name, `ROOM_INDEX` to `PairLobbyRoomIndex` as SQLite classes, as `wrangler.jsonc` does. [`examples/custom-worker`](examples/custom-worker) adds rules of its own in front of the relay. `DurableRoomStore` is also exported, for keeping rooms in your own object; its `hideHistoryBefore` hides a room's oldest history without deleting it, as the hosted service does for a full free workspace.
 
 ## Tests
 

@@ -7,15 +7,19 @@ import {hashCredential, normalizeInviteCode} from '@pairlobby/protocol';
 import {RoomService, createRelay} from '@pairlobby/server-core';
 import type {Relay} from '@pairlobby/server-core';
 
-import {DurableRoomStore} from './store.js';
 import type {RelayEnv} from './relay.js';
 import {ROOM_ID_HEADER, json} from './relay.js';
+import type {ListedRoom} from './room-index.js';
+import {ROOM_INDEX_NAME} from './room-index.js';
+import {DurableRoomStore} from './store.js';
 
 export class PairLobbyRoom extends DurableObject<RelayEnv> {
     private readonly store: DurableRoomStore;
     private readonly service: RoomService;
     private readonly relay: Relay;
     private queue: Promise<unknown> = Promise.resolve();
+    /** What the index last accepted from this room; undefined until read from storage. */
+    private listed: ListedRoom | null | undefined;
 
     constructor(ctx: DurableObjectState, env: RelayEnv) {
         super(ctx, env);
@@ -43,6 +47,7 @@ export class PairLobbyRoom extends DurableObject<RelayEnv> {
             }
             const response = await this.relay.inRoom(request, roomId);
             await this.scheduleAutoClose();
+            await this.updateIndex(roomId);
             return response;
         });
     }
@@ -66,6 +71,42 @@ export class PairLobbyRoom extends DurableObject<RelayEnv> {
         await this.serial(async () => {
             await this.relay.tick('auto-close');
             await this.scheduleAutoClose();
+            // Closing can only take a room off the index, so a room that was never listed has nothing to send.
+            const listed = await this.lastListed();
+            if (listed) {
+                await this.updateIndex(listed.roomId);
+            }
         });
+    }
+
+    private async lastListed(): Promise<ListedRoom | null> {
+        if (this.listed === undefined) {
+            this.listed = (await this.ctx.storage.get<ListedRoom>('listed')) ?? null;
+        }
+        return this.listed;
+    }
+
+    /**
+     * Tells the index when what this room lists has changed. The room's own change is already
+     * stored, so a failure here does not fail the request: the next request to the room tries again.
+     */
+    private async updateIndex(roomId: string): Promise<void> {
+        if (!this.env.ROOM_INDEX) {
+            return;
+        }
+        const next = this.store.listedRoom(roomId);
+        const previous = await this.lastListed();
+        if (JSON.stringify(next) === JSON.stringify(previous)) {
+            return;
+        }
+        try {
+            const index = this.env.ROOM_INDEX.getByName(ROOM_INDEX_NAME);
+            await (next ? index.put(next) : index.remove(roomId));
+        } catch (error) {
+            console.error(`room ${roomId}: the room index was not updated`, error);
+            return;
+        }
+        await (next ? this.ctx.storage.put('listed', next) : this.ctx.storage.delete('listed'));
+        this.listed = next;
     }
 }

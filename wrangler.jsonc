@@ -8,11 +8,13 @@
   "durable_objects": {
     "bindings": [
       {"name": "ROOMS", "class_name": "PairLobbyRoom"},
-      {"name": "INVITES", "class_name": "PairLobbyInviteDirectory"}
+      {"name": "INVITES", "class_name": "PairLobbyInviteDirectory"},
+      {"name": "ROOM_INDEX", "class_name": "PairLobbyRoomIndex"}
     ]
   },
   "migrations": [
-    {"tag": "v1", "new_sqlite_classes": ["PairLobbyRoom", "PairLobbyInviteDirectory"]}
+    {"tag": "v1", "new_sqlite_classes": ["PairLobbyRoom", "PairLobbyInviteDirectory"]},
+    {"tag": "v2", "new_sqlite_classes": ["PairLobbyRoomIndex"]}
   ],
   "vars": {
     "PAIRLOBBY_DEPLOYMENT_MODE": "self-hosted"

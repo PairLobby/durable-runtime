@@ -3,6 +3,7 @@
 //! boundary the local Node/SQLite store uses, so all three adapters pass one contract.
 
 import {ProtocolError, mergeMessageRequest} from '@pairlobby/protocol';
+import type {ListedRoom} from './room-index.js';
 import {SCHEMA} from './schema.js';
 
 import type {FileRecord, HandoverRecord, MessageRequest, RequestPage, InviteRecord, ParticipantRecord, RoomEvent, RoomRecord} from '@pairlobby/protocol';
@@ -326,6 +327,17 @@ export class DurableRoomStore implements RoomStore {
     async nextAutoCloseAt(): Promise<number | null> {
         const row = this.db.prepare("SELECT min(json_extract(body, '$.autoCloseAt')) AS at FROM rooms WHERE json_extract(body, '$.lifecycle') = 'open' AND json_extract(body, '$.autoCloseAt') IS NOT NULL").get() as {at: number | null} | undefined;
         return row?.at ?? null;
+    }
+
+    /** What the room lists for joining by name, as the Node relay lists it, or null when it is not listed: closed, or neither public nor protected. */
+    listedRoom(roomId: string): ListedRoom | null {
+        const row = this.db.prepare("SELECT body FROM rooms WHERE room_id = ? AND (json_extract(body, '$.policy.localJoin') = 1 OR json_extract(body, '$.policy.type') = 'protected') AND json_extract(body, '$.lifecycle') = 'open'").get(roomId) as BodyRow | undefined;
+        if (!row) {
+            return null;
+        }
+        const room = JSON.parse(row.body) as RoomRecord;
+        const {active} = this.db.prepare("SELECT count(*) AS active FROM participants WHERE room_id = ? AND json_extract(body, '$.revokedAt') IS NULL AND json_extract(body, '$.leftAt') IS NULL").get(roomId) as {active: number};
+        return {roomId: room.roomId, name: room.name, createdAt: room.createdAt, participantCount: Number(active), type: room.policy.localJoin ? 'public' : 'protected', expiresAt: room.expiresAt};
     }
 
     /**
