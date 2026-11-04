@@ -4,6 +4,7 @@ import {handleRelay} from './relay.js';
 import type {RelayEnv} from './relay.js';
 
 export {PairLobbyInviteDirectory} from './invite-directory.js';
+export {PairLobbyRoomIndex} from './room-index.js';
 export {PairLobbyRoom} from './room-object.js';
 
 export default {

@@ -1,0 +1,18 @@
+// The standalone relay behind an access proxy, for tests/listed-rooms.test.ts.
+{
+  "name": "pairlobby-relay-gate",
+  "main": "../src/standalone.ts",
+  "compatibility_date": "2026-09-14",
+  "durable_objects": {
+    "bindings": [
+      {"name": "ROOMS", "class_name": "PairLobbyRoom"},
+      {"name": "INVITES", "class_name": "PairLobbyInviteDirectory"},
+      {"name": "ROOM_INDEX", "class_name": "PairLobbyRoomIndex"}
+    ]
+  },
+  "migrations": [
+    {"tag": "v1", "new_sqlite_classes": ["PairLobbyRoom", "PairLobbyInviteDirectory"]},
+    {"tag": "v2", "new_sqlite_classes": ["PairLobbyRoomIndex"]}
+  ],
+  "vars": {"PAIRLOBBY_DEPLOYMENT_MODE": "self-hosted", "PAIRLOBBY_PROXY_IS_ACCESS_GATE": "1"}
+}

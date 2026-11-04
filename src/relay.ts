@@ -11,6 +11,8 @@ import {CREATE_TOKEN_HEADER, RoomService, createAdmission, createRelay} from '@p
 import type {Relay, RoomStore} from '@pairlobby/server-core';
 
 import type {PairLobbyInviteDirectory} from './invite-directory.js';
+import type {PairLobbyRoomIndex} from './room-index.js';
+import {ROOM_INDEX_NAME} from './room-index.js';
 import type {PairLobbyRoom} from './room-object.js';
 
 export {CREATE_TOKEN_HEADER};
@@ -18,10 +20,18 @@ export {CREATE_TOKEN_HEADER};
 export type RelayEnv = {
     ROOMS: DurableObjectNamespace<PairLobbyRoom>;
     INVITES: DurableObjectNamespace<PairLobbyInviteDirectory>;
+    /** The public and protected rooms, for finding and joining them by name. Unbound, rooms are joined only with invite codes. */
+    ROOM_INDEX?: DurableObjectNamespace<PairLobbyRoomIndex>;
     /** Comma-separated Host values to accept; unset accepts any host behind the operator's ingress. */
     PAIRLOBBY_ALLOWED_HOSTS?: string;
     /** When set, creating a room needs this token; joining with an invite code never does. */
     PAIRLOBBY_CREATE_TOKEN?: string;
+    /**
+     * `1` when an access proxy in front of the relay, such as Cloudflare Access, lets through only
+     * people who may use it. Everyone it admits may then find public and protected rooms by name and
+     * join them without a code. Needs `ROOM_INDEX`.
+     */
+    PAIRLOBBY_PROXY_IS_ACCESS_GATE?: string;
 };
 
 /** Internal claim from the relay to a room object: which room the request is for. Any caller-supplied copy is overwritten. */
@@ -53,6 +63,8 @@ function edgeRelay(env: RelayEnv): Relay {
         return cached;
     }
     const hosts = env.PAIRLOBBY_ALLOWED_HOSTS?.split(',').map((host) => host.trim()).filter(Boolean);
+    const gate = ['1', 'true'].includes(env.PAIRLOBBY_PROXY_IS_ACCESS_GATE?.trim().toLowerCase() ?? '');
+    const index = env.ROOM_INDEX;
     const relay = createRelay({
         service: new RoomService(edgeStore()),
         // A browser page must not drive a relay with a person's credentials: any Origin is refused.
@@ -62,7 +74,9 @@ function edgeRelay(env: RelayEnv): Relay {
         transport: 'poll',
         admission: createAdmission(env.PAIRLOBBY_CREATE_TOKEN ? {createToken: env.PAIRLOBBY_CREATE_TOKEN} : {}),
         // A code names its room only through the directory; the room then checks the code itself.
-        inviteRoom: (digest) => env.INVITES.getByName(digest).lookup()
+        inviteRoom: (digest) => env.INVITES.getByName(digest).lookup(),
+        // Behind the gate every caller counts as local; the Worker never sees a caller's own address.
+        ...(gate && index ? {behindProxy: true, proxyIsAccessGate: true, peerIsLocal: () => true, localRooms: (name?: string) => index.getByName(ROOM_INDEX_NAME).rooms(name)} : {})
     });
     relays.set(env, relay);
     return relay;
