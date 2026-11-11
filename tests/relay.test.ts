@@ -1,9 +1,9 @@
 import {afterAll, beforeAll, describe, expect, test} from 'vitest';
 import {createTestHarness} from 'wrangler';
 import {PairLobbyClient} from '@pairlobby/client';
-import {ProtocolError, newId} from '@pairlobby/protocol';
+import {ProtocolError, ServerFrame, newId} from '@pairlobby/protocol';
 
-const harness = createTestHarness({workers: [{configPath: 'wrangler.jsonc'}]});
+const harness = createTestHarness({workers: [{configPath: 'wrangler.jsonc', vars: {PAIRLOBBY_LIMIT_CREATE_PER_MIN_IP: '1000', PAIRLOBBY_LIMIT_REDEEM_PER_MIN_IP: '1000'}}]});
 let base: string;
 
 beforeAll(async () => {
@@ -17,6 +17,67 @@ afterAll(async () => {
 const human = {displayName: 'Ada', kind: 'human' as const};
 const agent = {displayName: 'claude-backend', kind: 'agent' as const};
 
+type HarnessWorker = ReturnType<typeof harness.getWorker>;
+type HarnessSocket = NonNullable<Awaited<ReturnType<HarnessWorker['fetch']>>['webSocket']>;
+type SocketMessage = {data: unknown};
+
+function nextFrame(socket: HarnessSocket, accepts: (frame: ServerFrame) => boolean): Promise<ServerFrame> {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { socket.removeEventListener('message', message); reject(new Error('socket frame timed out')); }, 3000);
+        const message = (event: SocketMessage) => {
+            const frame = ServerFrame.parse(JSON.parse(String(event.data)));
+            if (accepts(frame)) {
+                clearTimeout(timer);
+                socket.removeEventListener('message', message);
+                resolve(frame);
+            }
+        };
+        socket.addEventListener('message', message);
+    });
+}
+
+test('legacy connections coexist while negotiated state hints survive hibernation and receipt-only commits', async () => {
+    const worker = harness.getWorker();
+    const owner = new PairLobbyClient(base);
+    const room = await owner.createRoom('sockets', human);
+    const joined = await owner.redeemInvite(room.invite.code, agent);
+    const sockets: HarnessSocket[] = [];
+    try {
+        for (const sync of [false, false, true]) {
+            const response = await worker.fetch(`https://relay.test/v1/rooms/${room.roomId}/connect-ticket`, {method: 'POST', headers: {authorization: `Bearer ${joined.participantCredential}`, 'content-type': 'application/json'}, body: JSON.stringify(sync ? {sync, connectionId: newId('session')} : {})});
+            expect(response.status).toBe(200);
+            const {ticket} = await response.json() as {ticket: string};
+            const path = `https://relay.test/v1/rooms/${room.roomId}/connect?ticket=${ticket}`;
+            const connected = await worker.fetch(path, {headers: {upgrade: 'websocket'}});
+            expect(connected.status).toBe(101);
+            const socket = connected.webSocket!;
+            socket.accept();
+            sockets.push(socket);
+            expect((await nextFrame(socket, (frame) => frame.type === 'hello')).type).toBe('hello');
+            expect((await worker.fetch(path, {headers: {upgrade: 'websocket'}})).status).toBe(401);
+        }
+        const legacy = sockets.slice(0, 2).map((socket) => nextFrame(socket, (frame) => frame.type === 'event'));
+        const changed = nextFrame(sockets[2]!, (frame) => frame.type === 'state');
+        const sent = await owner.send(room.roomId, room.participantCredential, {type: 'message', recipientId: joined.participantId, payload: {text: 'receive this', priority: 'normal'}, idempotencyKey: newId('event')});
+        for (const received of await Promise.all(legacy)) {
+            expect(received).toMatchObject({type: 'event', event: {eventId: sent.event.eventId}});
+        }
+        const before = await changed;
+        expect(before).toMatchObject({type: 'state', latestSeq: sent.event.seq});
+        await worker.evictDurableObject('ROOMS', {name: room.roomId, webSockets: 'hibernate'});
+        const receipt = nextFrame(sockets[2]!, (frame) => frame.type === 'state' && before.type === 'state' && frame.stateRevision > before.stateRevision);
+        await owner.postReceipt(room.roomId, joined.participantCredential, sent.event.seq);
+        expect(await receipt).toMatchObject({type: 'state', latestSeq: sent.event.seq});
+        expect(sockets.every((socket) => socket.readyState === WebSocket.OPEN)).toBe(true);
+        const probe = nextFrame(sockets[2]!, (frame) => frame.type === 'state');
+        sockets[2]!.send(JSON.stringify({type: 'state'}));
+        expect(await probe).toMatchObject({type: 'state', latestSeq: sent.event.seq});
+    } finally {
+        sockets.forEach((socket) => socket.close());
+        owner.closeLive();
+    }
+}, 20_000);
+
 describe('standalone durable relay', () => {
     test('test_health_answers', async () => {
         const response = await fetch(new URL('/health', base));
@@ -24,12 +85,12 @@ describe('standalone durable relay', () => {
         expect(await response.json()).toEqual({service: 'pairlobby-relay', ready: true});
     });
 
-    test('test_the_relay_describes_itself_as_polling_with_files', async () => {
+    test('test_the_relay_describes_hibernating_sockets_and_its_shared_kernel_features', async () => {
         const response = await fetch(new URL('/v1/server', base));
         expect(response.status).toBe(200);
         const described = (await response.json()) as {protocol: number; features: string[]; transport: {live: string}; limits: {maxParticipants: number; maxFileBytes: number}};
-        expect(described).toMatchObject({protocol: 1, transport: {live: 'poll'}, limits: {maxParticipants: 32, maxFileBytes: 95 * 1024 * 1024}});
-        expect(described.features).toEqual(['message-stages', 'files', 'receipt-watermark', 'room-types']);
+        expect(described).toMatchObject({protocol: 1, transport: {live: 'websocket'}, limits: {maxParticipants: 32, maxFileBytes: 95 * 1024 * 1024}});
+        expect(described.features).toEqual(['message-stages', 'files', 'stream-files', 'receipt-watermark', 'room-types', 'room-sync', 'stream-export']);
     });
 
     test('test_without_an_access_gate_rooms_are_not_listed_or_joined_by_name', async () => {

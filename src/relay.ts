@@ -6,8 +6,8 @@
 //! this Worker runs its `edge` half, which admits a request and names its room, and
 //! each room's object runs `inRoom`. What is left here is routing to the objects.
 
-import {RoomId} from '@pairlobby/protocol';
-import {CREATE_TOKEN_HEADER, RoomService, createAdmission, createRelay} from '@pairlobby/server-core';
+import {DEFAULT_ROOM_POLICY, RoomId, hashCredential} from '@pairlobby/protocol';
+import {CREATE_TOKEN_HEADER, RoomService, createAdmission, createRelay, relayPolicySettings} from '@pairlobby/server-core';
 import type {Relay, RoomStore} from '@pairlobby/server-core';
 
 import type {PairLobbyInviteDirectory} from './invite-directory.js';
@@ -18,6 +18,7 @@ import type {PairLobbyRoom} from './room-object.js';
 export {CREATE_TOKEN_HEADER};
 
 export type RelayEnv = {
+    [setting: string]: unknown;
     ROOMS: DurableObjectNamespace<PairLobbyRoom>;
     INVITES: DurableObjectNamespace<PairLobbyInviteDirectory>;
     /** The public and protected rooms, for finding and joining them by name. Unbound, rooms are joined only with invite codes. */
@@ -26,6 +27,8 @@ export type RelayEnv = {
     PAIRLOBBY_ALLOWED_HOSTS?: string;
     /** When set, creating a room needs this token; joining with an invite code never does. */
     PAIRLOBBY_CREATE_TOKEN?: string;
+    /** Header set and overwritten by a trusted ingress; without one, address-based limits share the unknown bucket. */
+    PAIRLOBBY_TRUSTED_PROXY_HEADER?: string;
     /**
      * `1` when an access proxy in front of the relay, such as Cloudflare Access, lets through only
      * people who may use it. Everyone it admits may then find public and protected rooms by name and
@@ -65,14 +68,19 @@ function edgeRelay(env: RelayEnv): Relay {
     const hosts = env.PAIRLOBBY_ALLOWED_HOSTS?.split(',').map((host) => host.trim()).filter(Boolean);
     const gate = ['1', 'true'].includes(env.PAIRLOBBY_PROXY_IS_ACCESS_GATE?.trim().toLowerCase() ?? '');
     const index = env.ROOM_INDEX;
+    const settings = relayPolicySettings(env);
+    const proxyHeader = env.PAIRLOBBY_TRUSTED_PROXY_HEADER?.trim().toLowerCase();
+    if (proxyHeader && !/^[a-z0-9-]+$/.test(proxyHeader)) {
+        throw new Error('PAIRLOBBY_TRUSTED_PROXY_HEADER must be a header name');
+    }
     const relay = createRelay({
-        service: new RoomService(edgeStore()),
+        service: new RoomService(edgeStore(), undefined, undefined, {...DEFAULT_ROOM_POLICY, ...settings.roomLimits}, {receiptMode: settings.receiptMode ?? 'both'}),
         // A browser page must not drive a relay with a person's credentials: any Origin is refused.
         allowedOrigins: [],
         ...(hosts?.length ? {allowedHosts: hosts} : {}),
-        // Every read is a poll: no object holds a request open, which would bill it while it waits.
-        transport: 'poll',
-        admission: createAdmission(env.PAIRLOBBY_CREATE_TOKEN ? {createToken: env.PAIRLOBBY_CREATE_TOKEN} : {}),
+        // Idle sockets hibernate; HTTP event reads remain available for replay and older clients.
+        transport: 'websocket',
+        admission: createAdmission({...(env.PAIRLOBBY_CREATE_TOKEN ? {createToken: env.PAIRLOBBY_CREATE_TOKEN} : {}), ...(proxyHeader ? {trustedProxyHeader: proxyHeader} : {}), limits: settings.limits, limiter: {take: async (key, cost, limit) => env.INVITES.getByName(`admission:${await hashCredential(key)}`).take(cost, limit)}}),
         // A code names its room only through the directory; the room then checks the code itself.
         inviteRoom: (digest) => env.INVITES.getByName(digest).lookup(),
         // Behind the gate every caller counts as local; the Worker never sees a caller's own address.

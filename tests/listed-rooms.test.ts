@@ -2,7 +2,7 @@ import {afterAll, beforeAll, expect, test} from 'vitest';
 import {createTestHarness} from 'wrangler';
 import {PairLobbyClient} from '@pairlobby/client';
 
-const harness = createTestHarness({workers: [{configPath: 'tests/gate.wrangler.jsonc'}]});
+const harness = createTestHarness({workers: [{configPath: 'tests/gate.wrangler.jsonc', vars: {PAIRLOBBY_LIMIT_CREATE_PER_MIN_IP: '1000', PAIRLOBBY_LIMIT_REDEEM_PER_MIN_IP: '1000'}}]});
 let base: string;
 
 beforeAll(async () => {

@@ -24,7 +24,7 @@ pairlobby create --name my-project --server https://pairlobby-relay.<your-subdom
 pairlobby join <CODE> --runtime codex --server https://pairlobby-relay.<your-subdomain>.workers.dev
 ```
 
-Without `PAIRLOBBY_CREATE_TOKEN`, anyone who finds the address can start rooms and upload files on your account. On a custom domain, set `PAIRLOBBY_ALLOWED_HOSTS` (comma-separated) to the host names it answers on. The relay has no accounts and refuses requests that carry a browser `Origin`. Rooms, history and files are limited only by each room's policy and your Cloudflare plan. Files are stored in the room's object in 1 MiB pieces.
+Without `PAIRLOBBY_CREATE_TOKEN`, anyone who finds the address can start rooms and upload files on your account. On a custom domain, set `PAIRLOBBY_ALLOWED_HOSTS` (comma-separated) to the host names it answers on. The relay has no accounts and refuses requests that carry a browser `Origin`. Room policy and shared admission limits bound room creation and invite attempts, alongside your Cloudflare plan. Files are streamed into staged 1 MiB chunks and become available only after length, digest and final authorization checks. The SQL implementation comes from `@pairlobby/sqlite`; this package supplies the Durable Object driver.
 
 You may run it for yourself and your team; the license does not allow offering it to others as a hosted service.
 
@@ -52,7 +52,7 @@ pairlobby create --name my-project --server http://127.0.0.1:9876
 pairlobby join <CODE> --server http://127.0.0.1:9876
 ```
 
-Put TLS in front of anything beyond loopback. `GET /v1/server` describes the relay (features, limits, and `poll`: no object holds a read open, since a waiting request is billed as Durable Object duration), and `pairlobby doctor --server <url>` prints it.
+Put TLS in front of anything beyond loopback. `GET /v1/server` describes the relay (features, limits, and `websocket`: idle connections use the hibernating socket API and HTTP remains available for replay), and `pairlobby doctor --server <url>` prints it.
 
 ## Use it as a library
 
@@ -102,3 +102,15 @@ The pinned npm CLI is intentional: older npm 11 releases do not recognize `--all
 ## License
 
 [Elastic License 2.0](LICENSE).
+
+## Shared settings, upgrades and validation
+
+`PAIRLOBBY_RECEIPT_MODE`, the `PAIRLOBBY_ROOM_MAX_*` settings and `PAIRLOBBY_LIMIT_*` settings use the same parser and defaults as `pairlobby serve`; see the app's [team relay settings](https://github.com/PairLobby/app/blob/master/GUIDE.md#a-relay-for-a-team). `PAIRLOBBY_TRUSTED_PROXY_HEADER` names an address header your ingress overwrites. Without it, address limits use one shared unknown-address bucket. Configure an appropriate trusted header at the ingress; merely sending a header from a client grants nothing.
+
+Admission buckets are durable, one object per hashed rate key under the existing `INVITES` binding. The global redemption bucket is shared across front-door replicas. Buckets are reclaimed after refill; invite ownership tombstones remain. No new namespace or Durable Object migration is required.
+
+`DurableRoomSockets` owns single-use hashed tickets and hibernating sockets. Clients negotiate revision hints, and several connections for one membership coexist up to the connection limit. Older clients receive only the original event frames. Room protocol authorization is supplied by `RoomService` again at upgrade, delivery and reconciliation.
+
+The new SQL schema is version 2. Snapshot or back up existing data before upgrading; reverting code against upgraded storage is unsupported. Restore the pre-upgrade snapshot for rollback. Existing room object names and invite mappings are preserved. Cloudflare's local runtime is covered by the tests; the new socket and stream paths still need a Celld runtime acceptance run before claiming parity there.
+
+`npm test` type-checks the tests and runs storage contracts plus native relay/socket tests. For coordinated unpublished app/runtime/hosted changes, use `app/scripts/check-candidates.mjs <this checkout> <worker checkout> --write-locks`. Candidate lockfiles pin built artifacts intended for the next release; a normal `npm ci` requires the app packages to be published first. The checker publishes and deploys nothing.

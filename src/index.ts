@@ -1,4 +1,5 @@
 export * from './store.js';
+export * from './sockets.js';
 export * from './schema.js';
 export * from './relay.js';
 export {PairLobbyInviteDirectory} from './invite-directory.js';

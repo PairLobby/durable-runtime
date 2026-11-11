@@ -4,7 +4,8 @@
 // restart. Skips when no Celld binary is available (set CELLD_BIN or put celld on PATH).
 
 import {spawn, spawnSync} from 'node:child_process';
-import {existsSync, rmSync} from 'node:fs';
+import {cpSync, existsSync, mkdtempSync, rmSync, symlinkSync} from 'node:fs';
+import {tmpdir} from 'node:os';
 import {createServer} from 'node:net';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -13,8 +14,6 @@ import {PairLobbyClient} from '@pairlobby/client';
 import {newId} from '@pairlobby/protocol';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const project = root;
-const state = join(project, '.celld');
 
 function findCelld() {
     if (process.env.CELLD_BIN) {
@@ -87,8 +86,13 @@ if (!celld) {
 }
 
 const port = await freePort();
-let server = await start(celld, port, true);
+const project = mkdtempSync(join(tmpdir(), 'pairlobby-celld-'));
+let server;
 try {
+    cpSync(join(root, 'src'), join(project, 'src'), {recursive: true});
+    cpSync(join(root, 'wrangler.jsonc'), join(project, 'wrangler.jsonc'));
+    symlinkSync(join(root, 'node_modules'), join(project, 'node_modules'), 'dir');
+    server = await start(celld, port, true);
     const owner = new PairLobbyClient(server.base);
     const guest = new PairLobbyClient(server.base);
     const room = await owner.createRoom('celld', {displayName: 'Ada', kind: 'human'});
@@ -112,6 +116,6 @@ try {
     const restored = await after.readEvents(joined.roomId, joined.participantCredential, 0);
     check(restored.events.some((event) => event.eventId === sent.event.eventId), 'room state survives a celld restart');
 } finally {
-    await server.stop();
-    rmSync(state, {recursive: true, force: true});
+    await server?.stop();
+    rmSync(project, {recursive: true, force: true});
 }

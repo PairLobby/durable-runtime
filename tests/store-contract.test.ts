@@ -49,7 +49,7 @@ function factory(): TestableRoomStore {
             }
             return async (...args: unknown[]) => {
                 await pending;
-                const result = await stub.call(method as Exclude<keyof DurableRoomStore, 'files'>, args);
+                const result = await stub.call(method as Exclude<keyof DurableRoomStore, 'files' | 'directory'>, args);
                 if (!result.ok) {
                     throw new ProtocolError(result.error.code as ErrorCode, result.error.message);
                 }
