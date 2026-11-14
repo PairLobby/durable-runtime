@@ -31,6 +31,16 @@ function factory(): TestableRoomStore {
             if (method === 'files') {
                 return new Proxy({}, {
                     get(_files, operation: string) {
+                        if (operation === 'retention') {
+                            return new Proxy({}, {get: (_retention, method: string) => async (...args: unknown[]) => {
+                                await pending;
+                                const result = await stub.callFileRetention(method as never, args) as FileCallResult;
+                                if (result.ok) {
+                                    return result.value;
+                                }
+                                throw new ProtocolError(result.error.code as ErrorCode, result.error.message);
+                            }});
+                        }
                         return async (...args: unknown[]) => {
                             await pending;
                             const result = (await stub.callFiles(operation as never, args)) as FileCallResult;

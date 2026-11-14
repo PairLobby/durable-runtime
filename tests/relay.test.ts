@@ -17,6 +17,32 @@ afterAll(async () => {
 const human = {displayName: 'Ada', kind: 'human' as const};
 const agent = {displayName: 'claude-backend', kind: 'agent' as const};
 
+test('file confirmations survive eviction and delete the chunks only after every recipient', async () => {
+    const client = new PairLobbyClient(base);
+    const room = await client.createRoom('file receipts', human);
+    const first = await client.redeemInvite(room.invite.code, agent);
+    const second = await client.redeemInvite((await client.mintInvite(room.roomId, room.controllerCredential)).code, {displayName: 'second', kind: 'human'});
+    const file = await client.uploadFile(room.roomId, room.participantCredential, 'received.txt', new TextEncoder().encode('complete file'), 'text/plain', {mode: 'until-received'});
+    await client.send(room.roomId, room.participantCredential, {type: 'message', payload: {text: 'file', priority: 'normal', attachments: [file]}, idempotencyKey: newId('event')});
+    expect(await client.confirmFileReceipt(room.roomId, first.participantCredential, file.fileId, file)).toMatchObject({remaining: 1});
+    await harness.getWorker().evictDurableObject('ROOMS', {name: room.roomId});
+    expect(await client.confirmFileReceipt(room.roomId, second.participantCredential, file.fileId, file)).toMatchObject({available: false, remaining: 0});
+    const storage = await harness.getWorker().getDurableObjectStorage('ROOMS', {name: room.roomId});
+    expect(await storage.exec('SELECT count(*) AS n FROM file_chunks WHERE file_id=?', file.fileId)).toEqual([{n: 0}]);
+    expect((await client.fileList(room.roomId, room.participantCredential)).usage?.usedBytes).toBe(0);
+});
+
+test('a file expiry alarm deletes bytes from an idle evicted room without a room read', async () => {
+    const client = new PairLobbyClient(base);
+    const room = await client.createRoom('file expiry', human);
+    const file = await client.uploadFile(room.roomId, room.participantCredential, 'temporary.txt', new TextEncoder().encode('expires'), 'text/plain', {mode: 'temporary', ttlMs: 1000});
+    await client.send(room.roomId, room.participantCredential, {type: 'message', payload: {text: 'file', priority: 'normal', attachments: [file]}, idempotencyKey: newId('event')});
+    await harness.getWorker().evictDurableObject('ROOMS', {name: room.roomId});
+    const storage = await harness.getWorker().getDurableObjectStorage('ROOMS', {name: room.roomId});
+    await expect.poll(async () => storage.exec('SELECT count(*) AS n FROM files WHERE file_id=?', file.fileId), {timeout: 5000}).toEqual([{n: 0}]);
+    expect(await storage.exec('SELECT count(*) AS n FROM file_chunks WHERE file_id=?', file.fileId)).toEqual([{n: 0}]);
+});
+
 type HarnessWorker = ReturnType<typeof harness.getWorker>;
 type HarnessSocket = NonNullable<Awaited<ReturnType<HarnessWorker['fetch']>>['webSocket']>;
 type SocketMessage = {data: unknown};
@@ -90,7 +116,7 @@ describe('standalone durable relay', () => {
         expect(response.status).toBe(200);
         const described = (await response.json()) as {protocol: number; features: string[]; transport: {live: string}; limits: {maxParticipants: number; maxFileBytes: number}};
         expect(described).toMatchObject({protocol: 1, transport: {live: 'websocket'}, limits: {maxParticipants: 32, maxFileBytes: 95 * 1024 * 1024}});
-        expect(described.features).toEqual(['message-stages', 'files', 'stream-files', 'receipt-watermark', 'room-types', 'room-sync', 'stream-export']);
+        expect(described.features).toEqual(['message-stages', 'files', 'stream-files', 'file-retention', 'receipt-watermark', 'room-types', 'room-sync', 'stream-export']);
     });
 
     test('test_without_an_access_gate_rooms_are_not_listed_or_joined_by_name', async () => {

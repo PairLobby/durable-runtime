@@ -2,7 +2,7 @@
 import {DurableObject} from 'cloudflare:workers';
 import {DurableRoomStore} from '../src/store.js';
 import {ProtocolError} from '@pairlobby/protocol';
-import type {FileStore} from '@pairlobby/server-core';
+import type {FileRetentionStore, FileStore} from '@pairlobby/server-core';
 
 export type StoreCallResult = {ok: true; value: string} | {ok: false; error: {code: string; message: string}};
 export type FileCallResult = {ok: true; value: unknown} | {ok: false; error: {code: string; message: string}};
@@ -18,7 +18,7 @@ export class StoreFixture extends DurableObject {
         return {before, filled, after: sql.databaseSize};
     }
     /** File operations carry bytes, so their values cross RPC as they are rather than as JSON. */
-    async callFiles(method: keyof FileStore, args: unknown[]): Promise<FileCallResult> {
+    async callFiles(method: Exclude<keyof FileStore, 'retention'>, args: unknown[]): Promise<FileCallResult> {
         try {
             const operation = this.store.files[method];
             if (!operation) {
@@ -27,6 +27,14 @@ export class StoreFixture extends DurableObject {
             return {ok: true, value: await Reflect.apply(operation, this.store.files, args)};
         } catch (error) {
             return {ok: false, error: {code: error instanceof ProtocolError ? error.code : 'server_unavailable', message: error instanceof Error ? error.message : 'Store operation failed'}};
+        }
+    }
+    async callFileRetention(method: keyof FileRetentionStore, args: unknown[]): Promise<FileCallResult> {
+        try {
+            const retention = this.store.files.retention!;
+            return {ok: true, value: await Reflect.apply(retention[method], retention, args)};
+        } catch (error) {
+            return {ok: false, error: {code: error instanceof ProtocolError ? error.code : 'server_unavailable', message: error instanceof Error ? error.message : 'File retention operation failed'}};
         }
     }
     async call(method: Exclude<keyof DurableRoomStore, 'files' | 'directory'>, args: unknown[]): Promise<StoreCallResult> {
