@@ -116,7 +116,7 @@ describe('standalone durable relay', () => {
         expect(response.status).toBe(200);
         const described = (await response.json()) as {protocol: number; features: string[]; transport: {live: string}; limits: {maxParticipants: number; maxFileBytes: number}};
         expect(described).toMatchObject({protocol: 1, transport: {live: 'websocket'}, limits: {maxParticipants: 32, maxFileBytes: 95 * 1024 * 1024}});
-        expect(described.features).toEqual(['message-stages', 'files', 'stream-files', 'file-retention', 'receipt-watermark', 'room-types', 'room-sync', 'stream-export']);
+        expect(described.features).toEqual(['message-stages', 'files', 'stream-files', 'file-retention', 'file-cleanup', 'receipt-watermark', 'room-types', 'room-sync', 'stream-export']);
     });
 
     test('test_without_an_access_gate_rooms_are_not_listed_or_joined_by_name', async () => {

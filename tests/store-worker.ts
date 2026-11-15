@@ -32,7 +32,11 @@ export class StoreFixture extends DurableObject {
     async callFileRetention(method: keyof FileRetentionStore, args: unknown[]): Promise<FileCallResult> {
         try {
             const retention = this.store.files.retention!;
-            return {ok: true, value: await Reflect.apply(retention[method], retention, args)};
+            const operation = retention[method];
+            if (!operation) {
+                throw new Error(`unsupported file retention operation: ${method}`);
+            }
+            return {ok: true, value: await Reflect.apply(operation, retention, args)};
         } catch (error) {
             return {ok: false, error: {code: error instanceof ProtocolError ? error.code : 'server_unavailable', message: error instanceof Error ? error.message : 'File retention operation failed'}};
         }
