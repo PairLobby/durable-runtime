@@ -51,7 +51,7 @@ export function json(body: unknown, status = 200): Response {
  * and rooms here keep files, so the description lists them. Any room operation is refused.
  */
 function edgeStore(): RoomStore {
-    const known: Record<string | symbol, unknown> = {files: {}};
+    const known: Record<string | symbol, unknown> = {files: {retention: {}}};
     return new Proxy(known, {
         get: (target, property) => (property in target ? target[property] : () => Promise.reject(new Error(`the relay Worker keeps no rooms (${String(property)})`)))
     }) as unknown as RoomStore;

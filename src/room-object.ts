@@ -34,7 +34,13 @@ export class PairLobbyRoom extends DurableObject<RelayEnv> {
         }, {...DEFAULT_ROOM_POLICY, ...settings.roomLimits}, {receiptMode: settings.receiptMode ?? 'both'});
         // The relay Worker ran the kernel's edge: origins, hosts, the create token and the room's id.
         this.sockets = new DurableRoomSockets(ctx, this.service);
-        this.relay = createRelay({service: this.service, connections: this.sockets, executor: {run: (_roomId, _write, action) => this.serial(action), idle: () => this.queue.then(() => {})}});
+        this.relay = createRelay({service: this.service, connections: this.sockets, executor: {run: (_roomId, _write, action) => this.serial(action), idle: () => this.queue.then(() => {})}, scheduler: {plan: async (at) => {
+            if (at === null) {
+                await this.ctx.storage.deleteAlarm();
+            } else {
+                await this.ctx.storage.setAlarm(Math.max(Date.now(), at));
+            }
+        }}});
     }
 
     /** Requests interleave at every await; one at a time keeps room transitions ordered. */
@@ -61,9 +67,10 @@ export class PairLobbyRoom extends DurableObject<RelayEnv> {
         return handle();
     }
 
-    /** One alarm per room, aimed at its auto-close deadline. */
+    /** The room's alarm wakes for the earliest room or file deadline. */
     private async scheduleAutoClose(): Promise<void> {
-        const next = await this.store.nextAutoCloseAt();
+        const deadlines = [await this.store.nextAutoCloseAt(), await this.service.nextFileExpiryAt()].filter((at): at is number => at !== null);
+        const next = deadlines.length ? Math.min(...deadlines) : null;
         const current = await this.ctx.storage.getAlarm();
         if (next === null) {
             if (current !== null) {
@@ -80,7 +87,6 @@ export class PairLobbyRoom extends DurableObject<RelayEnv> {
         await this.relay.tick('auto-close');
         await this.serial(async () => {
             await this.flushChanges();
-            await this.scheduleAutoClose();
             // Closing can only take a room off the index, so a room that was never listed has nothing to send.
             const listed = await this.lastListed();
             if (listed) {

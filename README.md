@@ -114,3 +114,10 @@ Admission buckets are durable, one object per hashed rate key under the existing
 The new SQL schema is version 2. Snapshot or back up existing data before upgrading; reverting code against upgraded storage is unsupported. Restore the pre-upgrade snapshot for rollback. Existing room object names and invite mappings are preserved. Cloudflare's local runtime is covered by the tests; the new socket and stream paths still need a Celld runtime acceptance run before claiming parity there.
 
 `npm test` type-checks the tests and runs storage contracts plus native relay/socket tests. For coordinated unpublished app/runtime/hosted changes, use `app/scripts/check-candidates.mjs <this checkout> <worker checkout> --write-locks`. Candidate lockfiles pin built artifacts intended for the next release; a normal `npm ci` requires the app packages to be published first. The checker publishes and deploys nothing.
+
+
+## File retention policies
+
+Updated shared packages and this adapter support `file-retention`: uploads may be kept forever (the default), expire after a duration, or be removed after every original recipient confirms a verified file download. The shared kernel owns recipient selection and deletion decisions; SQLite applies them atomically, and each room's Durable Object alarm includes its earliest file deadline. Receipts survive eviction. A file receipt is `POST /v1/rooms/<room>/files/<file>/receipt` with the verified `size` and `sha256`; message acknowledgements do not delete attachments.
+
+This coordinated upgrade uses SQLite schema 3. Build and test with the matching app packages before publishing; from the app checkout, `node scripts/check-candidates.mjs ../durable-runtime ../worker` verifies the unpublished packages together and restores installed dependencies afterward. Temporary files are unavailable at their deadline even if an alarm retries later. See the app guide's Files section for sender syntax and recipient semantics.
