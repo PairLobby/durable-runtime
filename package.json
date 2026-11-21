@@ -1,6 +1,6 @@
 {
   "name": "@pairlobby/durable-runtime",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "PairLobby rooms on Durable Objects: the room store and a standalone relay for Celld or Cloudflare",
   "license": "Elastic-2.0",
   "type": "module",
@@ -42,15 +42,15 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@pairlobby/protocol": "0.33.0",
-    "@pairlobby/room-core": "0.33.0",
-    "@pairlobby/server-core": "0.33.0",
-    "@pairlobby/sqlite": "0.33.0"
+    "@pairlobby/protocol": "0.36.2",
+    "@pairlobby/room-core": "0.36.2",
+    "@pairlobby/server-core": "0.36.2",
+    "@pairlobby/sqlite": "0.36.2"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260914.1",
-    "@pairlobby/client": "0.33.0",
-    "@pairlobby/fixtures": "0.33.0",
+    "@pairlobby/client": "0.36.2",
+    "@pairlobby/fixtures": "0.36.2",
     "@types/node": "^22.10.2",
     "esbuild": "0.28.1",
     "typescript": "^5.7.2",
